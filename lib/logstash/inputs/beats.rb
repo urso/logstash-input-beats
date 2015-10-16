@@ -128,7 +128,15 @@ class LogStash::Inputs::Beats < LogStash::Inputs::Base
 
     @codec.decode(message) do |decoded|
       decorate(decoded)
-      map.each { |k, v| decoded[k] = v; v.force_encoding(Encoding::UTF_8) }
+      map.each { |k, v|
+        # what if v is not a string but an object?
+        if not v.nil?
+          decoded[k] = v;
+          v.force_encoding(Encoding::UTF_8)
+        else
+          @logger.warn("Beats input: nil value for key: " + k)
+        end
+      }
       return decoded
     end
   end
