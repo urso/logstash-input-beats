@@ -139,7 +139,7 @@ class LogStash::Inputs::Beats < LogStash::Inputs::Base
       begin
         # If any errors occur in from the events the connection should be closed in the
         # library ensure block and the exception will be handled here
-        connection.run do
+        connection.run do |map|
           block.call(create_event(codec, map))
         end
 
