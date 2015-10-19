@@ -42,6 +42,9 @@ class LogStash::Inputs::Beats < LogStash::Inputs::Base
   # this option is useful to control how much time to wait if something is blocking the pipeline.
   config :congestion_threshold, :validate => :number, :default => 5
 
+  # This is the default field that the specified codec will be applied
+  config :target_field_for_codec, :validate => :string, :default => "message"
+
   # TODO(sissel): Add CA to authenticate clients with.
   BUFFERED_QUEUE_SIZE = 1
   RECONNECT_BACKOFF_SLEEP = 0.5
@@ -53,8 +56,8 @@ class LogStash::Inputs::Beats < LogStash::Inputs::Base
     require "logstash/sized_queue_timeout"
 
     if !@ssl
-      @logger.warn("SSL Certificate will not be used") unless @ssl_certificate.nil?
-      @logger.warn("SSL Key will not be used") unless @ssl_key.nil?
+      @logger.warn("Beats: SSL Certificate will not be used") unless @ssl_certificate.nil?
+      @logger.warn("Beats: SSL Key will not be used") unless @ssl_key.nil?
     elsif !ssl_configured?
       raise LogStash::ConfigurationError, "Certificate or Certificate Key not configured"
     end
@@ -124,20 +127,17 @@ class LogStash::Inputs::Beats < LogStash::Inputs::Base
   private
   def create_event(codec, map)
     # Filebeats uses the `message` key and LSF `line`
-    message = map.delete("message")
+    target_field = map.delete(target_field_for_codec)
 
-    @codec.decode(message) do |decoded|
-      decorate(decoded)
-      map.each { |k, v|
-        # what if v is not a string but an object?
-        if not v.nil?
-          decoded[k] = v;
-          v.force_encoding(Encoding::UTF_8)
-        else
-          @logger.warn("Beats input: nil value for key: " + k)
-        end
-      }
-      return decoded
+    if target_field.nil?
+      return LogStash::Event.new(map)
+    else
+      # All codes expects to work on string
+      @codec.decode(target_field.to_s) do |decoded|
+        decorate(decoded)
+        map.each { |k, v| decoded[k] = v }
+        return decoded
+      end
     end
   end
 
@@ -147,9 +147,7 @@ class LogStash::Inputs::Beats < LogStash::Inputs::Base
       begin
         # If any errors occur in from the events the connection should be closed in the
         # library ensure block and the exception will be handled here
-        connection.run do |map|
-          block.call(create_event(codec, map))
-        end
+        connection.run { |map| block.call(create_event(codec, map)) }
 
         # When too many errors happen inside the circuit breaker it will throw
         # this exception and start refusing connection. The bubbling of theses
